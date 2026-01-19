@@ -10,7 +10,9 @@ type PlayerRow = {
   first_name: string | null;
   last_name: string | null;
   level: string | null;
+  archived_at?: string | null;
 };
+
 
 export default function PlayersPage() {
   const supabase = useMemo(() => getBrowserSupabase(), []);
@@ -18,19 +20,18 @@ export default function PlayersPage() {
 
   const [status, setStatus] = useState('');
   const [players, setPlayers] = useState<PlayerRow[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
 
-  useEffect(() => {
+    useEffect(() => {
     (async () => {
       setStatus('Loading...');
 
-      // Must be logged in
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         router.push('/login');
         return;
       }
 
-      // Must be coach + get club_id
       const { data: prof, error: profErr } = await supabase
         .from('users_profile')
         .select('role, club_id')
@@ -52,12 +53,14 @@ export default function PlayersPage() {
         return;
       }
 
-      // Load players for this club
-      const { data, error } = await supabase
+      const q = supabase
         .from('players')
-        .select('id, first_name, last_name, level')
-        .eq('club_id', prof.club_id)
-        .order('last_name', { ascending: true });
+        .select('id, first_name, last_name, level, archived_at')
+        .eq('club_id', prof.club_id);
+
+      const { data, error } = showArchived
+        ? await q.order('last_name', { ascending: true })
+        : await q.is('archived_at', null).order('last_name', { ascending: true });
 
       if (error) {
         setStatus(error.message);
@@ -67,22 +70,50 @@ export default function PlayersPage() {
       setPlayers((data ?? []) as PlayerRow[]);
       setStatus('');
     })();
-  }, [supabase, router]);
+  }, [supabase, router, showArchived]);
 
-  async function deletePlayer(id: string) {
-    const ok = confirm('Delete this player? This cannot be undone.');
+  async function archivePlayer(id: string) {
+    const ok = confirm('Archive this player? You can restore them later.');
     if (!ok) return;
 
-    setStatus('Deleting...');
+    setStatus('Archiving...');
 
-    const { error } = await supabase.from('players').delete().eq('id', id);
+    const now = new Date().toISOString();
+
+    const { error } = await supabase
+      .from('players')
+      .update({ archived_at: now })
+      .eq('id', id);
 
     if (error) {
       setStatus(error.message);
       return;
     }
 
-    setPlayers((prev) => prev.filter((p) => p.id !== id));
+    // If not showing archived, remove it from the active list immediately
+    if (!showArchived) {
+      setPlayers((prev) => prev.filter((p) => p.id !== id));
+    } else {
+      setPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, archived_at: now } : p)));
+    }
+
+    setStatus('');
+  }
+
+  async function restorePlayer(id: string) {
+    setStatus('Restoring...');
+
+    const { error } = await supabase
+      .from('players')
+      .update({ archived_at: null })
+      .eq('id', id);
+
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+
+    setPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, archived_at: null } : p)));
     setStatus('');
   }
 
@@ -90,9 +121,22 @@ export default function PlayersPage() {
   return (
     <div className="container" style={{ maxWidth: 820 }}>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ margin: 0 }}>Players</h1>
-        <Link href="/coach/players/new" className="badge">+ Add Player</Link>
-      </div>
+  <h1 style={{ margin: 0 }}>Players</h1>
+
+  <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+    <label className="small" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <input
+        type="checkbox"
+        checked={showArchived}
+        onChange={(e) => setShowArchived(e.target.checked)}
+      />
+      Show archived
+    </label>
+
+    <Link href="/coach/players/new" className="badge">+ Add Player</Link>
+  </div>
+</div>
+
 
       {status ? <p style={{ marginTop: 12 }}>{status}</p> : null}
 
@@ -117,13 +161,16 @@ export default function PlayersPage() {
                 <div className="row" style={{ gap: 8 }}>
   <Link className="badge" href={`/coach/players/${p.id}/edit`}>Edit</Link>
 
-  <button
-  className="secondary"
-  disabled={status === 'Deleting...'}
-  onClick={() => deletePlayer(p.id)}
->
-  Delete
-</button>
+  {p.archived_at ? (
+  <button className="secondary" onClick={() => restorePlayer(p.id)}>
+    Restore
+  </button>
+) : (
+  <button className="secondary" onClick={() => archivePlayer(p.id)}>
+    Archive
+  </button>
+)}
+
 </div>
 
               </div>
