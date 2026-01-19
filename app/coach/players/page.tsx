@@ -69,6 +69,24 @@ export default function PlayersPage() {
     })();
   }, [supabase, router]);
 
+  async function deletePlayer(id: string) {
+    const ok = confirm('Delete this player? This cannot be undone.');
+    if (!ok) return;
+
+    setStatus('Deleting...');
+
+    const { error } = await supabase.from('players').delete().eq('id', id);
+
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+
+    setPlayers((prev) => prev.filter((p) => p.id !== id));
+    setStatus('');
+  }
+
+
   return (
     <div className="container" style={{ maxWidth: 820 }}>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
@@ -97,8 +115,17 @@ export default function PlayersPage() {
                 </div>
 
                 <div className="row" style={{ gap: 8 }}>
-                  <Link className="badge" href={`/coach/players/${p.id}/edit`}>Edit</Link>
-                </div>
+  <Link className="badge" href={`/coach/players/${p.id}/edit`}>Edit</Link>
+
+  <button
+  className="secondary"
+  disabled={status === 'Deleting...'}
+  onClick={() => deletePlayer(p.id)}
+>
+  Delete
+</button>
+</div>
+
               </div>
             ))}
           </div>
